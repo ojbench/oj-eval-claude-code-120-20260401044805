@@ -252,18 +252,25 @@ private:
             return;
         }
 
+        node->time = time;
+
         // Determine which wheel to use based on time
-        if (time <= second_wheel->size * second_wheel->interval) {
+        if (time / second_wheel->interval <= second_wheel->size) {
             // Add to second wheel
             size_t slot = (second_wheel->current_slot + time / second_wheel->interval) % second_wheel->size;
             second_wheel->insertTask(node, slot);
-        } else if (time <= minute_wheel->size * minute_wheel->interval) {
-            // Add to minute wheel
-            size_t slot = time / minute_wheel->interval;
+        } else if (time / minute_wheel->interval <= minute_wheel->size) {
+            // Add to minute wheel - need to adjust for current position
+            // The formula from the algorithm: adjusted_time = time + current_slot * interval
+            size_t adjusted_time = time + second_wheel->current_slot * second_wheel->interval;
+            node->time = adjusted_time;
+            size_t slot = (adjusted_time / minute_wheel->interval) % minute_wheel->size;
             minute_wheel->insertTask(node, slot);
-        } else if (time <= hour_wheel->size * hour_wheel->interval) {
+        } else if (time / hour_wheel->interval <= hour_wheel->size) {
             // Add to hour wheel
-            size_t slot = time / hour_wheel->interval;
+            size_t adjusted_time = time + second_wheel->current_slot * second_wheel->interval;
+            node->time = adjusted_time;
+            size_t slot = (adjusted_time / hour_wheel->interval) % hour_wheel->size;
             hour_wheel->insertTask(node, slot);
         } else {
             // Time exceeds all wheels
