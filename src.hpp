@@ -157,6 +157,20 @@ public:
         // Advance second wheel first
         bool minute_tick = second_wheel->advance();
 
+        // Handle cascading BEFORE processing current slot
+        if (minute_tick) {
+            bool hour_tick = minute_wheel->advance();
+
+            // Cascade from hour wheel first if needed
+            if (hour_tick) {
+                hour_wheel->advance();
+                cascadeTasks(hour_wheel, result);
+            }
+
+            // Then cascade from minute wheel
+            cascadeTasks(minute_wheel, result);
+        }
+
         // Process tasks at current second slot
         TaskNode* current = second_wheel->getCurrentSlotTasks();
         TaskNode* next_node = nullptr;
@@ -177,18 +191,6 @@ public:
             }
 
             current = next_node;
-        }
-
-        // Handle minute wheel tick
-        if (minute_tick) {
-            bool hour_tick = minute_wheel->advance();
-            cascadeTasks(minute_wheel, result);
-
-            // Handle hour wheel tick
-            if (hour_tick) {
-                hour_wheel->advance();
-                cascadeTasks(hour_wheel, result);
-            }
         }
 
         return result;
