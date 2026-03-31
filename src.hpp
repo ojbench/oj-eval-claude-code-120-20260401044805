@@ -74,6 +74,11 @@ public:
         current_slot = (current_slot + 1) % size;
     }
 
+    bool advance() {
+        current_slot = (current_slot + 1) % size;
+        return current_slot == 0; // Return true if wrapped around
+    }
+
 private:
     const size_t size, interval;
     size_t current_slot;
@@ -149,93 +154,41 @@ public:
     std::vector<Task*> tick() {
         std::vector<Task*> result;
 
-        // Tick second wheel first
-        second_wheel->tick();
+        // Advance second wheel first
+        bool minute_tick = second_wheel->advance();
 
-        // Check if we need to cascade from higher wheels
-        bool minute_tick = (second_wheel->current_slot == 0);
-        bool hour_tick = false;
+        // Process tasks at current second slot
+        TaskNode* current = second_wheel->getCurrentSlotTasks();
+        TaskNode* next_node = nullptr;
 
-        if (minute_tick) {
-            minute_wheel->tick();
-            hour_tick = (minute_wheel->current_slot == 0);
-            if (hour_tick) {
-                hour_wheel->tick();
-            }
-        }
+        while (current != nullptr) {
+            next_node = current->next;
+            result.push_back(current->task);
 
-        // Cascade from hour wheel if needed
-        if (hour_tick) {
-            TaskNode* curr = hour_wheel->getCurrentSlotTasks();
-            while (curr) {
-                TaskNode* next = curr->next;
-                curr->next = curr->prev = nullptr;
-
-                // Calculate remaining time
-                size_t remaining_time = curr->time % hour_wheel->interval;
-                curr->time = remaining_time;
-
-                if (remaining_time == 0) {
-                    // Execute immediately
-                    result.push_back(curr->task);
-                    size_t period = curr->task->getPeriod();
-                    if (period > 0 && period <= 24 * 3600) {
-                        curr->time = period;
-                        addTaskToWheel(curr, period);
-                    } else {
-                        delete curr;
-                    }
-                } else {
-                    addTaskToWheel(curr, remaining_time);
-                }
-                curr = next;
-            }
-        }
-
-        // Cascade from minute wheel if needed
-        if (minute_tick) {
-            TaskNode* curr = minute_wheel->getCurrentSlotTasks();
-            while (curr) {
-                TaskNode* next = curr->next;
-                curr->next = curr->prev = nullptr;
-
-                // Calculate remaining time
-                size_t remaining_time = curr->time % minute_wheel->interval;
-                curr->time = remaining_time;
-
-                if (remaining_time == 0) {
-                    // Execute immediately
-                    result.push_back(curr->task);
-                    size_t period = curr->task->getPeriod();
-                    if (period > 0 && period <= 24 * 3600) {
-                        curr->time = period;
-                        addTaskToWheel(curr, period);
-                    } else {
-                        delete curr;
-                    }
-                } else {
-                    addTaskToWheel(curr, remaining_time);
-                }
-                curr = next;
-            }
-        }
-
-        // Process current second slot
-        TaskNode* curr = second_wheel->getCurrentSlotTasks();
-        while (curr) {
-            TaskNode* next = curr->next;
-            result.push_back(curr->task);
-
-            // Handle periodic tasks
-            size_t period = curr->task->getPeriod();
+            // Reschedule periodic task
+            size_t period = current->task->getPeriod();
             if (period > 0 && period <= 24 * 3600) {
-                curr->next = curr->prev = nullptr;
-                curr->time = period;
-                addTaskToWheel(curr, period);
+                current->time = period;
+                current->next = nullptr;
+                current->prev = nullptr;
+                addTaskToWheel(current, period);
             } else {
-                delete curr;
+                delete current;
             }
-            curr = next;
+
+            current = next_node;
+        }
+
+        // Handle minute wheel tick
+        if (minute_tick) {
+            bool hour_tick = minute_wheel->advance();
+            cascadeTasks(minute_wheel, result);
+
+            // Handle hour wheel tick
+            if (hour_tick) {
+                hour_wheel->advance();
+                cascadeTasks(hour_wheel, result);
+            }
         }
 
         return result;
@@ -245,6 +198,38 @@ private:
     TimingWheel* second_wheel;
     TimingWheel* minute_wheel;
     TimingWheel* hour_wheel;
+
+    void cascadeTasks(TimingWheel* wheel, std::vector<Task*>& result) {
+        // Move tasks from higher wheel to lower wheel
+        TaskNode* current = wheel->getCurrentSlotTasks();
+        TaskNode* next_node = nullptr;
+
+        while (current != nullptr) {
+            next_node = current->next;
+
+            // Adjust time based on the interval: task.time %= interval
+            current->time = current->time % wheel->interval;
+            current->next = nullptr;
+            current->prev = nullptr;
+
+            // If time is 0, task should execute immediately
+            if (current->time == 0) {
+                result.push_back(current->task);
+                // Reschedule if periodic
+                size_t period = current->task->getPeriod();
+                if (period > 0 && period <= 24 * 3600) {
+                    current->time = period;
+                    addTaskToWheel(current, period);
+                } else {
+                    delete current;
+                }
+            } else {
+                addTaskToWheel(current, current->time);
+            }
+
+            current = next_node;
+        }
+    }
 
     void addTaskToWheel(TaskNode* node, size_t time) {
         if (time == 0) {
